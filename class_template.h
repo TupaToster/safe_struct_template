@@ -1,20 +1,21 @@
-#pragma once
-#pragma GCC diagnostic ignored "-Wmultichar"
-#include <stdio.h>
 #include <stdlib.h>
-//#include "flog.h"
+#include <stdio.h>
+#include <math.h>
+#include <assert.h>
+#include "flog.h"
 
 #ifndef NDEBUG
-#define dump(clas) (clas).dumpInside (#clas, __FILE__, __FUNCTION__, __LINE__) ///< NEW_STRUCT dump macros
+#define dump(clas) (clas).dumpInside (#clas, __FILE__, __FUNCTION__, __LINE__)
+#define nsdump(clas, func) (clas).dumpInside (#clas, __FILE__, __FUNCTION__, __LINE__, func)
 #else
 #define dump(clas) ;
+#define nsdump(clas) ;
 #endif
 
 
-template<typename ELEM_T>
-class ClassTemplate {
+template<typename elem_t>
+class Stack {
 
-    // constants
     static constexpr unsigned int       CANL      = 0xDEADBEEF; ///< Left cannary of a structure
     static constexpr unsigned int       CANR      = 0xD34DB33F; ///< Right cannary of a structure
     static constexpr unsigned char      POISON1   = 0xBD; ///< 1 byte Poison
@@ -22,7 +23,6 @@ class ClassTemplate {
     static constexpr unsigned int       POISON4   = 0xBADC0FEE; ///< 4 byte Poison
     static constexpr unsigned long long POISON8   = 0xBADC0FEEF04DED32; ///< 8 byte Poison
     static constexpr unsigned int       MULT      = 37u; ///< Multiplier for hash
-    static constexpr unsigned int       MAX_RANKS = 100;
 
     enum errorCodes {
         ok                   = 0,    ///< All ok
@@ -42,132 +42,12 @@ class ClassTemplate {
     unsigned int   canL      = CANL; ///< left cannary of struct
     unsigned int   hash      = 0;    ///< hash value
     size_t         errCode   = ok;   ///< error code
-    ELEM_T*        data      = NULL; ///< Ptr to data
+    elem_t*        data      = NULL; ///< Ptr to data
+    size_t         cap       = 0;
+    size_t         size      = 0;
     unsigned int*  dataCanL  = NULL; ///< left cannary of data
     unsigned int*  dataCanR  = NULL; ///< right cannary of data
     unsigned int   canR      = CANR; ///< right cannary of struct
-
-    void countHashSeg (void* left, void* right, unsigned int* multiplier) {
-
-        assert (left != NULL);
-        assert (right != NULL);
-        assert (left < right);
-        assert (multiplier != NULL);
-
-        for (; left < right; left++) {
-
-            hash += ((unsigned int) * (char*) left) * (*multiplier);
-            *multiplier *= MULT;
-        }
-    }
-
-    void logPrintErrors () {
-
-        errCheck ();
-
-        char names [11][40] = {};
-        int iter = 0;
-        if (errCode & POISON_ACCESS        ) strcpy (names[iter++], "\t\t[POISON_ACCESS       ]<br>");
-        if (errCode & BAD_CAN_L            ) strcpy (names[iter++], "\t\t[BAD_CAN_L           ]<br>");
-        if (errCode & BAD_CAN_R            ) strcpy (names[iter++], "\t\t[BAD_CAN_R           ]<br>");
-        if (errCode & BAD_data_CAN_L       ) strcpy (names[iter++], "\t\t[BAD_data_CAN_L      ]<br>");
-        if (errCode & BAD_data_CAN_R       ) strcpy (names[iter++], "\t\t[BAD_data_CAN_R      ]<br>");
-        if (errCode & NULL_data_PTR        ) strcpy (names[iter++], "\t\t[NULL_data_PTR       ]<br>");
-        if (errCode & NULL_data_CAN_L_PTR  ) strcpy (names[iter++], "\t\t[NULL_data_CAN_L_PTR ]<br>");
-        if (errCode & NULL_data_CAN_R_PTR  ) strcpy (names[iter++], "\t\t[NULL_data_CAN_R_PTR ]<br>");
-        if (errCode & POISONED_ERRCOD      ) strcpy (names[iter++], "\t\t[POISONED_ERRCOD     ]<br>");
-        if (errCode & WRONG_HASH           ) strcpy (names[iter++], "\t\t[WRONG_HASH          ]<br>");
-
-        if (iter == 0) flogprintf ( "\t\t[ok]<br>")
-        else
-            for (int i = 0; i < iter; i++) flogprintf ( "%s", names[i])
-
-    }
-
-    unsigned int countHash () {
-
-        unsigned int multiplier = 1;
-        hash = 0;
-
-        countHashSeg (&canL, &canR, &multiplier);
-
-        if (dataCanL != NULL) countHashSeg (dataCanL, dataCanR, &multiplier);
-
-        return hash;
-    }
-
-    bool verifyHash () {
-
-        if (hash != countHash()) {
-
-            errCode |= WRONG_HASH;
-            return false;
-        }
-        return true;
-    }
-
-    size_t errCheck () {
-
-        //checking for poison
-        if (isPoison (&errCode  )   ) {
-
-            errCode = POISONED_ERRCOD;
-            return errCode;
-        }
-
-        verifyHash ();
-
-        if (isPoison (&canL     ) or
-            isPoison (&canR     ) or
-            isPoison (&data     ) or
-            isPoison (&dataCanL ) or
-            isPoison ( dataCanL ) or
-            isPoison (&dataCanR ) or
-            isPoison ( dataCanR ) or
-            isPoison (&hash     )   ) errCode |= POISON_ACCESS;
-
-        //end of check
-
-        if ( canL     != CANL      ) errCode |= BAD_CAN_L;
-        if ( canR     != CANR      ) errCode |= BAD_CAN_R;
-        if ( dataCanL == NULL      ) errCode |= NULL_data_CAN_L_PTR;
-        else if (*dataCanL != CANL ) errCode |= BAD_data_CAN_L;
-        if ( dataCanR == NULL      ) errCode |= NULL_data_CAN_R_PTR;
-        else if (*dataCanR != CANR ) errCode |= BAD_data_CAN_R;
-        if ( data     == NULL      ) errCode |= NULL_data_PTR;
-
-        countHash ();
-
-        return errCode;
-    }
-
-    public:
-
-    ClassTemplate (unsigned int _size = 1) :
-        canL (CANL), canR (CANR), hash(0), errCode (ok) {
-
-        dataCanL = (unsigned int*) calloc (sizeof (ELEM_T) * _size + 2 * sizeof (unsigned int), 1);
-        assert (dataCanL != NULL);
-        data = (ELEM_T*) (dataCanL + 1);
-        assert (data != NULL);
-        dataCanR = (unsigned int*) (data + _size);
-        assert (dataCanR != NULL);
-
-       *dataCanL = CANL;
-       *dataCanR = CANR;
-
-        countHash();
-    }
-
-    ELEM_T* getdata () {
-
-        return data;
-    }
-
-    unsigned int geterrCode () {
-
-        return errCode;
-    }
 
     template<typename varType>
     void setPoison (varType* var) {
@@ -223,32 +103,145 @@ class ClassTemplate {
         }
     }
 
-    void DTOR () {
+    void countHashSeg (void* left, void* right) {
 
-        setPoison (&canL);
-        setPoison (&canR);
-        setPoison (&errCode);
-        setPoison (&hash);
+        assert (left != NULL);
+        assert (right != NULL);
+        assert (left <= right);
 
-        if (dataCanL != NULL) {
+        for (; left <= right; left++) {
 
-            setPoison (dataCanL);
-            setPoison (dataCanR);
-            dataCanL++;
-            for (; (void*) data < (void*) dataCanR; data++) setPoison (data);
-            free (dataCanL);
-            setPoison (&dataCanL);
-            setPoison (&data);
-            setPoison (&dataCanR);
+            hash += ((unsigned int) * (char*) left);
+            hash *= MULT;
         }
     }
 
-    void dumpInside (const char* name, const char* fileName, const char* funcName, size_t line) {
+    unsigned int countHash () {
+
+        hash = 0;
+
+        countHashSeg (&canL, &canR);
+
+        if (dataCanL != NULL) countHashSeg (dataCanL, dataCanR);
+
+        return hash;
+    }
+
+    bool verifyHash () {
+
+        if (countHash () != hash) {
+
+            errCode |= WRONG_HASH;
+            return false;
+        }
+        return true;
+    }
+
+    size_t errCheck () {
+
+        if (isPoison (&errCode)) {
+
+            errCode = POISONED_ERRCOD;
+            return errCode;
+        }
+
+        verifyHash ();
+
+        if (isPoison (&canL    )
+        or  isPoison (&canR    )
+        or  isPoison (&data    )
+        or  isPoison (&dataCanL)
+        or  isPoison ( dataCanL)
+        or  isPoison (&dataCanR)
+        or  isPoison ( dataCanR)
+        or  isPoison (&hash    )) errCode |= POISON_ACCESS;
+
+        if      (canL != CANL      ) errCode |= BAD_CAN_L;
+        if      (canR != CANR      ) errCode |= BAD_CAN_R;
+        if      (dataCanL == NULL  ) errCode |= NULL_data_CAN_L_PTR;
+        else if (*dataCanL != CANL ) errCode |= BAD_data_CAN_L;
+        if      (dataCanR == NULL  ) errCode |= NULL_data_CAN_R_PTR;
+        else if (*dataCanR != CANR ) errCode |= BAD_data_CAN_R;
+        if      (data == NULL      ) errCode |= NULL_data_PTR;
+
+        countHash ();
+
+        return errCode;
+    }
+
+    void logPrintErrors () {
 
         errCheck ();
 
-        flogprintf ("<pre>" "In file %s, function %s, line %llu, ClassTemplate named %s was dumped : <br>",
-            fileName, funcName, line, name);
+        char names [11][30] = {};
+        int iter = 0;
+        if (errCode & POISON_ACCESS        ) strcpy (names[iter++], "\t\t[POISON_ACCESS       ]<br>");
+        if (errCode & BAD_CAN_L            ) strcpy (names[iter++], "\t\t[BAD_CAN_L           ]<br>");
+        if (errCode & BAD_CAN_R            ) strcpy (names[iter++], "\t\t[BAD_CAN_R           ]<br>");
+        if (errCode & BAD_data_CAN_L       ) strcpy (names[iter++], "\t\t[BAD_data_CAN_L      ]<br>");
+        if (errCode & BAD_data_CAN_R       ) strcpy (names[iter++], "\t\t[BAD_data_CAN_R      ]<br>");
+        if (errCode & NULL_data_PTR        ) strcpy (names[iter++], "\t\t[NULL_data_PTR       ]<br>");
+        if (errCode & NULL_data_CAN_L_PTR  ) strcpy (names[iter++], "\t\t[NULL_data_CAN_L_PTR ]<br>");
+        if (errCode & NULL_data_CAN_R_PTR  ) strcpy (names[iter++], "\t\t[NULL_data_CAN_R_PTR ]<br>");
+        if (errCode & WRONG_SIZE           ) strcpy (names[iter++], "\t\t[WRONG_SIZE          ]<br>");
+        if (errCode & POISONED_ERRCOD      ) strcpy (names[iter++], "\t\t[POISONED_ERRCOD     ]<br>");
+        if (errCode & WRONG_HASH           ) strcpy (names[iter++], "\t\t[WRONG_HASH          ]<br>");
+
+        if (iter == 0) flogprintf ( "\t\t[ok]<br>")
+        else
+            for (int i = 0; i < iter; i++) flogprintf ( "%s", names[i])
+
+    }
+
+    //non standard part
+
+    void resize () {
+
+        if (cap > 4 and size < cap * 3 / 8) {
+
+            data = (elem_t*) calloc (cap / 2 * sizeof (elem_t) + 2 * sizeof (unsigned int), 1);
+            assert (data != NULL);
+            cap /= 2;
+        }
+        else if (size == cap) {
+
+            data = (elem_t*) calloc (cap * 2 * sizeof (elem_t) + 2 * sizeof (unsigned int), 1);
+            assert (data != NULL);
+            cap *= 2;
+        }
+        else return;
+
+        memcpy (data, dataCanL, size * sizeof (elem_t) + sizeof (unsigned int));
+        free (dataCanL);
+        dataCanL = (unsigned int*) data;
+        data = (elem_t*) (dataCanL + 1);
+        dataCanR = (unsigned int*) (data + cap);
+        *dataCanR = CANR;
+    }
+
+    public:
+
+    Stack () : canL (CANL), canR (CANR), hash (0), errCode (ok), size (0), cap (4) {
+
+        dataCanL = (unsigned int*) calloc (cap * sizeof (elem_t) + 2 * sizeof (unsigned int), 1);
+        assert (dataCanL != NULL);
+
+        data = (elem_t*) (dataCanL + 1);
+        assert (data != NULL);
+
+        dataCanR = (unsigned int*) (data + cap);
+        assert (dataCanR != NULL);
+
+        *dataCanL = CANL;
+        *dataCanR = CANR;
+
+        countHash ();
+    }
+
+    void dumpInside (const char* name, const char* fileName, const char* funcName, size_t line, void (*dumpFunc) (elem_t*) = NULL) {
+
+        flogprintf ("<pre>" "In file %s, function %s, line %llu, Stack named \"%s\" was dumped :<br>",
+                    fileName, funcName, line, name);
 
         flogprintf ("\t" "Errors : <br>");
 
@@ -261,12 +254,20 @@ class ClassTemplate {
                                          flogprintf ( "\t" "canL     = 0x%X (", canL);
         if      ( isPoison (&canL)     ) flogprintf ( "POISONED)<br>")
         else if ( canL      == CANL    ) flogprintf ( "ok)<br>")
-        else                            flogprintf ( "NOT_OK)<br>")
+        else                             flogprintf ( "NOT_OK)<br>")
 
                                          flogprintf ( "\t" "canR     = 0x%X (", canR);
         if      ( isPoison (&canR)     ) flogprintf ( "POISONED)<br>")
         else if ( canR      == CANR    ) flogprintf ( "ok)<br>")
         else                             flogprintf ( "NOT_OK)<br>")
+
+                                         flogprintf ( "\t" "cap      = %llu (", cap);
+        if      ( isPoison (&cap)      ) flogprintf ( "POISONED)<br>")
+        else                             flogprintf ( "ok)<br>")
+
+                                         flogprintf ( "\t" "size     = %llu (", size);
+        if      ( isPoison (&size)     ) flogprintf ( "POISONED)<br>")
+        else                             flogprintf ( "ok)<br>")
 
                                          flogprintf ( "\t" "dataCanL = 0x%X (", *dataCanL);
         if      (isPoison (dataCanL)   ) flogprintf ( "POISONED)<br>")
@@ -278,13 +279,64 @@ class ClassTemplate {
         else if (*dataCanR == CANR     ) flogprintf ( "ok)<br>")
         else                             flogprintf ( "NOT_OK)<br>")
 
-        if (!isPoison (data) and data != NULL) {
+        if (data != NULL and !isPoison (data)) {
 
-            ClassTemplateGraphDump ();
+            flogprintf ("\t" "data : <br>");
+            int sizeLog10 = ceil (log10 (size));
+            for (int i = 0; i < size; i++) {
+
+                flogprintf ( "\t\t" "data[%*d] : ", sizeLog10, i);
+                if (dumpFunc != NULL) dumpFunc (data + i);
+                else flogprintf (getFormat (elem_t), data[i])
+                flogprintf ("<br>");
+            }
         }
 
-        flogprintf ("</pre><hr>\n");
+        flogprintf ("<hr>");
+    }
+
+    void DTOR () {
+
+        setPoison (&errCode);
+        setPoison (&canL);
+        setPoison (&canR);
+        setPoison (&hash);
+        setPoison (&size);
+        setPoison (&cap);
+
+        if (dataCanL != NULL) {
+
+            setPoison (dataCanL);
+            for (; (void*) data <= (void*) dataCanR; data++) setPoison (data);
+            free (dataCanL);
+            setPoison (&dataCanL);
+            setPoison (&data);
+            setPoison (&dataCanR);
+        }
+    }
+
+    void push (elem_t val, void (*cpy) (elem_t* dst, elem_t* src) = NULL) {
+
+        errCheck ();
+        resize ();
+
+        if (cpy != NULL) cpy (data + size, &val);
+        else data[size] = val;
+        size++;
+
         countHash ();
     }
 
+    elem_t pop () {
+
+        errCheck ();
+
+        elem_t retVal = data[size];
+        setPoison (data + size);
+        size--;
+
+        resize ();
+        countHash ();
+        return retVal;
+    }
 };
